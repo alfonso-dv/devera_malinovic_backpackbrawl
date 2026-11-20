@@ -1,11 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { POISON_DAMAGE_PER_STACK, POISON_INTERVAL, simulateBattle } from "./battle";
+import {
+    BURN_DAMAGE_PER_STACK,
+    BURN_INTERVAL,
+    buildFighter,
+    POISON_DAMAGE_PER_STACK,
+    POISON_INTERVAL,
+    simulateBattle,
+} from "./battle";
 import { CATALOG } from "./items";
+import { activeSets, countSets, FIRE_BURN_PER_HIT, NATURE_BONUS_HP } from "./sets";
 import type { Fighter } from "./types";
 
 /** A fighter with hand-made items, so every test controls exactly what happens. */
 function fighter(items: Fighter["items"], maxHp = 100): Fighter {
-    return { name: "Test", maxHp, items };
+    return { name: "Test", maxHp, items, activeSets: [] };
 }
 
 const item = (effects: Fighter["items"][number]["effects"], cooldown = 1) => ({
@@ -65,5 +73,74 @@ describe("catalog", () => {
     it("has at least 3 items per new effect", () => {
         expect(CATALOG.filter((i) => i.effects.poison).length).toBeGreaterThanOrEqual(3);
         expect(CATALOG.filter((i) => i.effects.heal).length).toBeGreaterThanOrEqual(3);
+    });
+
+    it("has at least 2 sets with at least 3 items each, one of them Fire", () => {
+        const counts = countSets(CATALOG.map((i) => i.id));
+        expect(counts.fire).toBeGreaterThanOrEqual(3);
+        expect(counts.nature).toBeGreaterThanOrEqual(3);
+    });
+});
+
+/* ------------- B4 TESTS ------------- */
+
+describe("sets", () => {
+    it("are active with 2 or more items of the set", () => {
+        expect(activeSets(["ember-torch"])).toEqual([]);
+        expect(activeSets(["ember-torch", "hunting-bow"])).toEqual(["fire"]);
+        expect(activeSets(["ember-torch", "ember-torch"])).toEqual(["fire"]); // duplicates count
+        expect(activeSets(["red-apple", "healing-salve", "ember-torch"])).toEqual(["nature"]);
+    });
+
+    it("Fire gives Fire items burn, but only while active", () => {
+        const off = buildFighter(["ember-torch", "chipped-dagger"], 40);
+        expect(off.items[0].effects.burn).toBeUndefined();
+        const on = buildFighter(["ember-torch", "flame-wand", "chipped-dagger"], 40);
+        expect(on.items[0].effects.burn).toBe(FIRE_BURN_PER_HIT);
+        expect(on.items[1].effects.burn).toBe(FIRE_BURN_PER_HIT);
+        expect(on.items[2].effects.burn).toBeUndefined(); // dagger is not a Fire item
+    });
+
+    it("Nature gives extra max HP", () => {
+        expect(buildFighter(["red-apple", "venom-vial"], 40).maxHp).toBe(40 + NATURE_BONUS_HP);
+        expect(buildFighter(["red-apple"], 40).maxHp).toBe(40);
+    });
+
+    it("work for opponents the same way (same buildFighter)", () => {
+        expect(buildFighter(["ember-torch", "hunting-bow"], 50, "Ash Golem").activeSets).toEqual(["fire"]);
+    });
+});
+
+/** Cooldown 31 fires exactly once in a 60-tick battle: at tick 31 (an odd tick, before a status tick). */
+const ONCE = 31;
+
+describe("burn", () => {
+    it("is absorbed by block first", () => {
+        const burner = fighter([item({ burn: 10 }, ONCE)]);
+        const target = dummy(100, [item({ block: 5 }, ONCE)]);
+        const result = simulateBattle(burner, target);
+        // Tick 31: 10 burn and 5 block. Tick 32: burn deals 10 × dmg, 5 of it is blocked.
+        const damage = 10 * BURN_DAMAGE_PER_STACK;
+        const tick = result.events.find((e) => e.kind === "burnTick")!;
+        expect(tick.tick).toBe(ONCE + 1);
+        expect(tick.amount).toBe(damage);
+        expect(result.frames[ONCE + 1].opponent.block).toBe(0);
+        expect(result.frames[ONCE + 1].opponent.hp).toBe(100 - (damage - 5));
+    });
+
+    it("decays (halves after every burn tick) until it wears off", () => {
+        const result = simulateBattle(fighter([item({ burn: 8 }, ONCE)]), dummy(1000));
+        const burnAt = (tick: number) => result.frames[tick].opponent.burn;
+        expect(burnAt(ONCE)).toBe(8);
+        expect(burnAt(ONCE + 1)).toBe(4);
+        expect(burnAt(ONCE + 3)).toBe(2);
+        expect(burnAt(ONCE + 5)).toBe(1);
+        expect(burnAt(ONCE + 7)).toBe(0);
+        expect(result.frames.at(-1)!.opponent.burn).toBe(0);
+        expect(BURN_INTERVAL).toBe(2); // the expectations above assume a burn tick every 2 ticks
+    });
+
+    it("deals more damage per stack than poison", () => {
+        expect(BURN_DAMAGE_PER_STACK).toBeGreaterThan(POISON_DAMAGE_PER_STACK);
     });
 });

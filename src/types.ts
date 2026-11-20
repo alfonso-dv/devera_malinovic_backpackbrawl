@@ -1,10 +1,16 @@
 export interface ItemEffects {
   damage?: number;
   block?: number;
-  //B3
+  /** B3: poison stacks added to the enemy. */
   poison?: number;
+  /** B3: HP the fighter restores for itself (never above max HP). */
   heal?: number;
+  /** B4: burn stacks added to the enemy. Only granted by the active Fire set bonus. */
+  burn?: number;
 }
+
+/** B4: the item sets. */
+export type SetId = "fire" | "nature";
 
 export interface ItemDef {
   id: string;
@@ -14,6 +20,8 @@ export interface ItemDef {
   /** Cooldown in battle ticks (1 tick = 0.5 s). */
   cooldown: number;
   effects: ItemEffects;
+  /** B4: the set this item belongs to, if any. */
+  set?: SetId;
 }
 
 /** A concrete item the player owns; several instances may share one `itemId`. */
@@ -60,12 +68,15 @@ export interface FighterSnapshot {
   block: number;
   /** B3: current poison stacks. */
   poison: number;
+  /** B4: current burn stacks. */
+  burn: number;
 }
 
-/** "poison" = stacks applied by an item, "poisonTick" = the poison dealing its damage. */
-export type BattleEventKind = "damage" | "block" | "heal" | "poison" | "poisonTick";
-
-
+/**
+ * "poison" / "burn" = stacks applied by an item,
+ * "poisonTick" / "burnTick" = the status dealing its damage.
+ */
+export type BattleEventKind = "damage" | "block" | "heal" | "poison" | "poisonTick" | "burn" | "burnTick";
 
 export interface BattleEvent {
   tick: number;
@@ -75,8 +86,8 @@ export interface BattleEvent {
   target: Side;
   kind: BattleEventKind;
   amount: number;
-  /** Item that triggered the event; missing for status ticks (poison damage). */
-  itemId?: string; //B3
+  /** Item that triggered the event; missing for status ticks (poison/burn damage). */
+  itemId?: string;
   message: string;
 }
 
@@ -102,6 +113,7 @@ export interface FighterItem {
   icon: string;
   cooldown: number;
   effects: ItemEffects;
+  set?: SetId;
 }
 
 /** Everything `simulateBattle` needs to know about one side. */
@@ -109,6 +121,8 @@ export interface Fighter {
   name: string;
   maxHp: number;
   items: FighterItem[];
+  /** B4: sets with enough items for their bonus. */
+  activeSets: SetId[];
 }
 
 /** A simulated battle being replayed frame by frame. */

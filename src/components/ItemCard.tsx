@@ -19,6 +19,7 @@ export function ItemCard({ item, children }: ItemCardProps) {
         </span>
         <div className="min-w-0 flex-1">
           <h3 className="truncate font-display font-bold">{item.name}</h3>
+            {item.set && <SetBadge set={item.set} />}
         </div>
       </div>
       <ul className="flex flex-wrap gap-x-3 gap-y-1 text-sm">

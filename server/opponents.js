@@ -3,7 +3,6 @@
  * so the table covers every round. Item ids must exist in src/items.ts.
  * Rounds past the table reuse the last opponent with more HP (see `opponentForRound`).
  */
-//B3
 export const OPPONENTS = [
   { id: "mossback-hermit", name: "Mossback Hermit", icon: "🐢", hp: 25, items: ["chipped-dagger", "pot-lid"] },
   // B3: first poison user
@@ -11,9 +10,11 @@ export const OPPONENTS = [
   // B3: first healer
   { id: "tollgate-ogre", name: "Tollgate Ogre", icon: "👹", hp: 44, items: ["hunting-bow", "chipped-dagger", "red-apple", "oak-buckler"] },
   { id: "rusted-knight", name: "Rusted Knight", icon: "🪖", hp: 46, items: ["iron-cleaver", "hunting-bow", "chipped-dagger", "oak-buckler", "pot-lid"] },
-  { id: "pit-gladiator", name: "Pit Gladiator", icon: "🦁", hp: 50, items: ["iron-cleaver", "hunting-bow", "chipped-dagger", "oak-buckler", "pot-lid"] },
-  { id: "ash-golem", name: "Ash Golem", icon: "🗿", hp: 56, items: ["iron-cleaver", "hunting-bow", "spiked-shield", "chipped-dagger", "oak-buckler"] },
-  // B3: poison and heal
+  // B4: Fire set (ember torch + flame wand) → burn
+  { id: "pit-gladiator", name: "Pit Gladiator", icon: "🦁", hp: 50, items: ["iron-cleaver", "ember-torch", "flame-wand", "oak-buckler", "pot-lid"] },
+  // B4: Fire set (ember torch + hunting bow) → burn
+  { id: "ash-golem", name: "Ash Golem", icon: "🗿", hp: 56, items: ["flame-wand", "ember-torch", "hunting-bow", "spiked-shield", "oak-buckler"] },
+  // B3 + B4: Nature set (venom vial + healing salve) → +10 HP, poison and heal
   { id: "hollow-king", name: "Hollow King", icon: "👑", hp: 64, items: ["iron-cleaver", "venom-vial", "healing-salve", "spiked-shield", "serpent-fang", "oak-buckler"] },
 ];
 

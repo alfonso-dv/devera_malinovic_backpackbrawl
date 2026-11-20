@@ -13,6 +13,8 @@
   --color-block: #a8a29e;
   --color-poison: #8bc34a;
   --color-heal: #6ee7b7;
+  --color-burn: #f97316;
+
 }
 
 @layer base {

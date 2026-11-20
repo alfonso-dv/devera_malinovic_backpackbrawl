@@ -1,4 +1,5 @@
 import { getItem } from "./items";
+import { FIRE_BURN_PER_HIT, NATURE_BONUS_HP, activeSets } from "./sets";
 import { itemIdsOf } from "./shop";
 import type { Backpack, BattleEvent, BattleResult, Fighter, FighterItem, FighterSnapshot, Opponent, Side } from "./types";
 
@@ -15,13 +16,32 @@ export const HERO_BASE_HP = 40;
 export const POISON_INTERVAL = 2;
 export const POISON_DAMAGE_PER_STACK = 1;
 
-/** Turns a list of item ids into a fighter with the catalog values of each item. */
+/* ------------- B4: burn -------------
+ * Every BURN_INTERVAL ticks a burning fighter takes BURN_DAMAGE_PER_STACK damage per stack.
+ * Block absorbs it first. Afterwards half of the stacks wear off (rounded down) until none are left.
+ * Compared to poison: twice the damage per stack, and every Fire item adds FIRE_BURN_PER_HIT
+ * stacks on top of its normal hit (stacks faster) — but block absorbs it and it decays.
+ */
+export const BURN_INTERVAL = 2;
+export const BURN_DAMAGE_PER_STACK = 2;
+
+/**
+ * Turns a list of item ids into a fighter with the catalog values of each item.
+ * B4: set bonuses are applied here, so they work the same for the player and for opponents.
+ */
 export function buildFighter(itemIds: string[], baseHp: number, name = "Fighter"): Fighter {
+  const sets = activeSets(itemIds);
+  const fireActive = sets.includes("fire");
   const items: FighterItem[] = itemIds.map((id) => {
     const def = getItem(id);
-    return { itemId: def.id, name: def.name, icon: def.icon, cooldown: def.cooldown, effects: { ...def.effects } };
+    const effects = { ...def.effects };
+    // Fire bonus: every Fire item additionally applies burn.
+    if (fireActive && def.set === "fire") effects.burn = (effects.burn ?? 0) + FIRE_BURN_PER_HIT;
+    return { itemId: def.id, name: def.name, icon: def.icon, cooldown: def.cooldown, effects, set: def.set };
   });
-  return { name, maxHp: baseHp, items };
+  // Nature bonus: more max HP.
+  const maxHp = baseHp + (sets.includes("nature") ? NATURE_BONUS_HP : 0);
+  return { name, maxHp, items, activeSets: sets };
 }
 
 /** The player's fighter: every backpack item and the hero's base HP. */
@@ -38,6 +58,7 @@ interface FighterState {
   hp: number;
   block: number;
   poison: number;
+  burn: number;
   /** Ticks each item has charged towards its cooldown. */
   charge: number[];
 }
@@ -49,6 +70,7 @@ const snapshot = (s: FighterState): FighterSnapshot => ({
   maxHp: s.fighter.maxHp,
   block: s.block,
   poison: s.poison,
+  burn: s.burn,
 });
 
 const isDown = (s: FighterState) => s.hp <= 0;
@@ -61,7 +83,8 @@ const isDown = (s: FighterState) => s.hp <= 0;
  * 1. Each fighter charges all items by one tick; items whose charge reaches their cooldown fire.
  * 2. Fired items resolve (player first, then opponent). Both sides fire "simultaneously":
  *    which items fire is decided before any effect is applied.
- * 3. B3: poison deals its damage every POISON_INTERVAL ticks, player first, then opponent.
+ * 3. B3/B4: status effects deal their damage (burn every BURN_INTERVAL ticks, poison every
+ *    POISON_INTERVAL ticks), player first, then opponent.
  * After step 3 the battle ends if someone is down; if both are down, the player loses.
  * After `MAX_TICKS` the higher HP percentage wins; a tie is a player loss.
  */
@@ -95,7 +118,7 @@ export function simulateBattle(player: Fighter, opponent: Fighter): BattleResult
     for (const side of ["player", "opponent"] as const) {
       for (const item of fired[side]) resolveItem(item, state[side], state[other(side)], side, emit);
     }
-    // B3: status effects come after all items of this tick.
+    // B3/B4: status effects come after all items of this tick.
     for (const side of ["player", "opponent"] as const) {
       applyStatus(tick, state[side], side, emit);
     }
@@ -110,7 +133,7 @@ export function simulateBattle(player: Fighter, opponent: Fighter): BattleResult
 }
 
 function initState(fighter: Fighter): FighterState {
-  return { fighter, hp: fighter.maxHp, block: 0, poison: 0, charge: fighter.items.map(() => 0) };
+  return { fighter, hp: fighter.maxHp, block: 0, poison: 0, burn: 0, charge: fighter.items.map(() => 0) };
 }
 
 /** Advances one tick of cooldowns and returns the items that fire this tick. */
@@ -133,7 +156,7 @@ function resolveItem(
     side: Side,
     emit: (event: Omit<BattleEvent, "tick">) => void,
 ) {
-  const { damage, block, poison, heal } = item.effects;
+  const { damage, block, poison, heal, burn } = item.effects;
   const base = { source: side, itemId: item.itemId };
   const enemySide = other(side);
 
@@ -160,12 +183,27 @@ function resolveItem(
     const note = healed < heal ? ` (max HP reached)` : "";
     emit({ ...base, target: side, kind: "heal", amount: healed, message: `${item.name} heals ${self.fighter.name} for ${healed}${note}` });
   }
+  // B4: burn stacks on the enemy (only from the Fire set bonus).
+  if (burn) {
+    enemy.burn += burn;
+    emit({ ...base, target: enemySide, kind: "burn", amount: burn, message: `${item.name} sets ${enemy.fighter.name} on fire (+${burn} burn, now ${enemy.burn})` });
+  }
 }
 
-/** B3: lets poison deal its damage to `self` (the fighter carrying the status). */
+/** B3/B4: lets burn and poison deal their damage to `self` (the fighter carrying the status). */
 function applyStatus(tick: number, self: FighterState, side: Side, emit: (event: Omit<BattleEvent, "tick">) => void) {
   // The "source" of a status tick is the enemy who applied it, so the log shows it on their side.
   const base = { source: other(side), target: side };
+
+  if (self.burn > 0 && tick % BURN_INTERVAL === 0) {
+    const damage = self.burn * BURN_DAMAGE_PER_STACK;
+    const absorbed = Math.min(self.block, damage);
+    self.block -= absorbed;
+    self.hp -= damage - absorbed;
+    self.burn = Math.floor(self.burn / 2); // decay: half the stacks wear off (rounded down)
+    const note = absorbed > 0 ? ` (${absorbed} blocked)` : "";
+    emit({ ...base, kind: "burnTick", amount: damage, message: `Burn scorches ${self.fighter.name} for ${damage}${note}, ${self.burn} left` });
+  }
 
   if (self.poison > 0 && tick % POISON_INTERVAL === 0) {
     const damage = self.poison * POISON_DAMAGE_PER_STACK;
