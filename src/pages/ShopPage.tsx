@@ -5,7 +5,7 @@ import { RulesPanel } from "../components/RulesPanel";
 import { RunHeader } from "../components/RunHeader";
 import { Shop } from "../components/Shop";
 import { fightBlocker, searchFailed, startBattle, startSearch, updateRun } from "../game";
-import { buyItem, rerollShop, sellItem } from "../run";
+import { buyItem, moveItem, rerollShop, sellItem } from "../run";
 import { useActiveGame } from "../state/GameContext";
 
 export function ShopPage() {
@@ -23,6 +23,12 @@ export function ShopPage() {
   function handleReroll() {
     update((current) => updateRun(current, rerollShop));
   }
+
+  /** Handles moving an item between slots in the backpack. */
+  function handleMove(from: number, to: number) {
+    update((current) => updateRun(current, (currentRun) => moveItem(currentRun, from, to)));
+  }
+
 
   // Once the opponent is found the phase becomes "battle" and RequireRoute redirects to the battle page.
   async function handleFindOpponent() {
@@ -42,10 +48,12 @@ export function ShopPage() {
       <RunHeader run={run} />
       <FightBar phase={phase} blocker={fightBlocker(game)} error={game.error} onFight={handleFindOpponent} />
 
+      {phase !== "shop" && <p className="text-sm text-muted">🔒 Shop and backpack are locked while searching for an opponent.</p>}
+
       {/* While searching, the whole shop/backpack area is disabled so the fighting build can't change. */}
       <fieldset disabled={phase !== "shop"} className="grid min-w-0 gap-4 disabled:opacity-60 lg:grid-cols-[1fr_16rem_18rem]">
         <Shop run={run} onBuy={handleBuy} onReroll={handleReroll} />
-        <Backpack run={run} onSell={handleSell} />
+        <Backpack run={run} locked={phase !== "shop"} onSell={handleSell} onMove={handleMove} />
         <aside className="flex flex-col gap-4">
           <RulesPanel open={run.round === 1} />
         </aside>

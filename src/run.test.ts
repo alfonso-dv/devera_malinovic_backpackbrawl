@@ -4,6 +4,8 @@ import { getItem } from "./items";
 import {
   buyBlocker,
   buyItem,
+  moveBlocker,
+  moveItem,
   newRun,
   REROLL_COST,
   rerollBlocker,
@@ -148,5 +150,47 @@ describe("shop actions outside the shop phase", () => {
 
   it("are applied while shopping", () => {
     expect(updateRun(game, (run) => sellItem(run, 0)).run.gold).toBe(12);
+  });
+});
+
+/** ------------- B2 TESTS ------------- */
+describe("moveItem", () => {
+  it("moves an item into an empty slot", () => {
+    const run = runWith(["iron-cleaver"]);
+    const moved = moveItem(run, 0, 4);
+    expect(moved.backpack[0]).toBeNull();
+    expect(moved.backpack[4]).toEqual(run.backpack[0]);
+  });
+
+  it("swaps with an item in an occupied slot", () => {
+    const run = runWith(["iron-cleaver", "pot-lid"]);
+    const moved = moveItem(run, 0, 1);
+    expect(moved.backpack[0]).toEqual(run.backpack[1]);
+    expect(moved.backpack[1]).toEqual(run.backpack[0]);
+  });
+
+  it("never loses or duplicates items and keeps gold and shop", () => {
+    const run = runWith(["iron-cleaver", "pot-lid", "hunting-bow"]);
+    const moved = moveItem(moveItem(run, 0, 5), 1, 2);
+    const uids = (r: RunState) => r.backpack.flatMap((s) => (s ? [s.uid] : [])).sort();
+    expect(uids(moved)).toEqual(uids(run));
+    expect(moved.gold).toBe(run.gold);
+    expect(moved.shop).toBe(run.shop);
+  });
+
+  it("changes nothing for an empty source, the same slot or slots outside the backpack", () => {
+    const run = runWith(["pot-lid"]);
+    expect(moveBlocker(run, 3, 0)).toBe("Nothing to move");
+    expect(moveItem(run, 3, 0)).toBe(run);
+    expect(moveBlocker(run, 0, 0)).toBe("Already in this slot");
+    expect(moveItem(run, 0, 0)).toBe(run);
+    expect(moveItem(run, 0, -1)).toBe(run);
+    expect(moveItem(run, 0, BACKPACK_SIZE)).toBe(run);
+    expect(moveItem(run, 0, 1.5)).toBe(run);
+  });
+
+  it("is ignored outside the shop phase", () => {
+    const game = { ...newGame(SEED), run: runWith(["pot-lid"]), phase: "searching" as const };
+    expect(updateRun(game, (run) => moveItem(run, 0, 1))).toBe(game);
   });
 });

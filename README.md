@@ -25,6 +25,7 @@ A won battle gives +1 win, a lost battle costs one life. The run ends with a vic
 - The shop shows **4 offers**, rolled from the catalog at the start of every round. The same offer may appear more than once.
 - **Buy** pays the price and puts the item into the first free slot of the backpack. A bought offer is marked as sold until the next round.
 - The backpack is a **2×3 grid** (2 columns, 3 rows, 6 slots), and every item takes exactly one slot. A bought item stays in its slot for the whole run. Hover over an item to see its details.
+- **Move**: click an item to select it (highlighted with ✋), then click any highlighted slot. An empty slot receives the item; an occupied slot swaps the two items. Click the selected item again, press Esc or use **Cancel** to deselect.
 - Only items in the backpack fight. Their position in the grid does not matter.
 
 Shop rolls are driven by a seeded random number generator stored in the run state, so the same seed always produces the same offers.

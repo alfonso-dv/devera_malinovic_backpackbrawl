@@ -98,3 +98,23 @@ export function applyBattleResult(state: RunState, winner: Side): RunState {
   const scored = winner === "player" ? { ...state, wins: state.wins + 1 } : { ...state, lives: state.lives - 1 };
   return runOutcome(scored) ? scored : startNextRound(scored);
 }
+
+/** ------------- B2 IMPLEMENTATION ------------- */
+
+const isSlot = (slot: number) => Number.isInteger(slot) && slot >= 0 && slot < BACKPACK_SIZE;
+
+/** Why the item in `from` can't be moved to `to` right now, or `null` if it can. */
+export function moveBlocker(state: RunState, from: number, to: number): string | null {
+  if (!isSlot(from) || !isSlot(to)) return "Not a backpack slot";
+  if (!state.backpack[from]) return "Nothing to move";
+  if (from === to) return "Already in this slot";
+  return null;
+}
+
+/** Moves the item in `from` to `to`; an item already in `to` swaps into `from`. Unchanged state if not allowed. */
+export function moveItem(state: RunState, from: number, to: number): RunState {
+  if (moveBlocker(state, from, to) !== null) return state;
+  const backpack = [...state.backpack];
+  [backpack[from], backpack[to]] = [backpack[to], backpack[from]];
+  return { ...state, backpack };
+}
