@@ -8,9 +8,11 @@ export const WINS_TO_VICTORY = 5;
 export const GOLD_PER_ROUND = 5;
 export const REROLL_COST = 1;
 
-export function newRun(seed: number): RunState {
+/** B7: `id` identifies the run in the hall of fame; the default is derived from the seed (handy in tests). */
+export function newRun(seed: number, id = `run-${seed.toString(36).padStart(8, "0")}`): RunState {
   const roll = rollShop(seed);
   return {
+    id,
     round: 1,
     gold: START_GOLD,
     lives: START_LIVES,

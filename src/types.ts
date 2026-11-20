@@ -39,6 +39,8 @@ export type ShopOffers = (string | null)[];
 export type Phase = "shop" | "searching" | "battle" | "finished";
 
 export interface RunState {
+  /** B7: unique id of the run, so the hall of fame never stores the same run twice. */
+  id: string;
   round: number;
   gold: number;
   lives: number;
@@ -153,4 +155,24 @@ export interface GameState {
   battle: BattleReplay | null;
   /** Last opponent-search error, shown in the shop. */
   error: string | null;
+}
+
+/* ------------- B7: hall of fame ------------- */
+
+/** What the client sends to the API for a finished run. */
+export interface RunSubmission {
+  runId: string;
+  name: string;
+  outcome: "victory" | "defeat";
+  wins: number;
+  lives: number;
+  rounds: number;
+}
+
+/** One stored run as the API returns it. */
+export interface HallOfFameEntry extends RunSubmission {
+  /** 1 = best run. */
+  rank: number;
+  /** ISO timestamp set by the server. */
+  createdAt: string;
 }

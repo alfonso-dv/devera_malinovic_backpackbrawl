@@ -25,8 +25,8 @@ import type { GameState, Opponent, Phase, RunState } from "./types";
  */
 
 export const SAVE_KEY = "backpack-brawl:save";
-/** Bump when the format changes; older saves are then rejected as incompatible. */
-export const SAVE_VERSION = 1;
+/** Bump when the format changes; older saves are then rejected as incompatible. B7: 2 = runs have an `id`. */
+export const SAVE_VERSION = 2;
 
 export const SEARCH_INTERRUPTED = "The search was interrupted by reloading the page. Nothing was lost — just search again.";
 
@@ -115,7 +115,8 @@ const isInt = (value: unknown, min: number, max = Number.MAX_SAFE_INTEGER): valu
 /** Checks shape AND plausibility: no negative gold, no unknown items, round fits wins and losses, … */
 export function isValidRun(value: unknown): value is RunState {
     if (!isObject(value)) return false;
-    const { round, gold, lives, wins, seed, shop, backpack, nextUid } = value;
+    const { id, round, gold, lives, wins, seed, shop, backpack, nextUid } = value;
+    if (typeof id !== "string" || !/^[A-Za-z0-9-]{8,64}$/.test(id)) return false; // B7: run id for the hall of fame
     if (!isInt(round, 1) || !isInt(gold, 0) || !isInt(lives, 0, START_LIVES) || !isInt(wins, 0, WINS_TO_VICTORY)) return false;
     if (!isInt(seed, 0, 2 ** 32 - 1) || !isInt(nextUid, 1)) return false;
     if (lives === 0 && wins === WINS_TO_VICTORY) return false; // can't win and lose at the same time

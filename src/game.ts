@@ -8,8 +8,8 @@ import type { BattleReplay, GameState, Opponent, RunState } from "./types";
  * Every function is pure, so they can be passed straight to `setState`.
  */
 
-export function newGame(seed: number): GameState {
-  return { phase: "shop", run: newRun(seed), search: null, battle: null, error: null };
+export function newGame(seed: number, runId?: string): GameState {
+  return { phase: "shop", run: newRun(seed, runId), search: null, battle: null, error: null };
 }
 
 /** Applies a shop/backpack action; only allowed while shopping. */
@@ -85,7 +85,7 @@ export function leaveBattle(game: GameState): GameState {
 }
 
 /** URL paths of the app's screens. */
-export const ROUTES = { start: "/", shop: "/shop", battle: "/battle", result: "/result" } as const;
+export const ROUTES = { start: "/", shop: "/shop", battle: "/battle", result: "/result", hallOfFame: "/hall-of-fame" } as const;
 export type GameRoute = (typeof ROUTES)[keyof typeof ROUTES];
 
 /**

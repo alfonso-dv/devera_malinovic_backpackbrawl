@@ -1,6 +1,6 @@
 # Backpack Brawl API
 
-The local API is a small Express server in `server/index.js`. It listens on port 4200 (override with the `PORT` environment variable). During Vite development, `/api` is proxied to it, so the frontend uses relative URLs such as `/api/opponents?round=1`. All responses are JSON. The server keeps no state: restarting it changes nothing about the answers.
+The local API is a small Express server in `server/index.js`. It listens on port 4200 (override with the `PORT` environment variable). During Vite development, `/api` is proxied to it, so the frontend uses relative URLs such as `/api/opponents?round=1`. All responses are JSON. Only the hall of fame (B7) keeps state, in memory; restarting the server empties it.
 
 ## `GET /api/health`
 
@@ -63,13 +63,83 @@ Every error response has the shape:
 
 An invalid `round` is reported as 400 even when failure is forced. All responses from this endpoint, errors included, arrive after the configured delay.
 
+## `GET /api/hall-of-fame` (B7)
+
+Returns the best finished runs, best first. The entries are kept **in memory**: restarting the server empties the hall of fame.
+
+### Query parameters
+
+| Parameter | Required | Meaning |
+|---|---|---|
+| `limit` | no | Number of entries, 1–50. Defaults to 10. Values that are not whole numbers fall back to 10. |
+| `latency` | no | Response delay in milliseconds, clamped to 0–5000. Defaults to 600. |
+| `fail` | no | `fail=true` forces a 503 response. |
+
+### Success — 200
+
+```json
+{
+  "entries": [
+    { "rank": 1, "runId": "6f1c…", "name": "Loretta", "outcome": "victory", "wins": 5, "lives": 2, "rounds": 6, "createdAt": "2026-11-20T18:00:00.000Z" }
+  ],
+  "total": 1
+}
+```
+
+`total` is the number of stored runs (it can be larger than the number of returned entries). An empty hall of fame returns `"entries": []`.
+
+### Ranking
+
+1. Victories before defeats
+2. More wins
+3. Fewer rounds
+4. More lives left
+5. Earlier submission (`createdAt`)
+
+## `POST /api/hall-of-fame` (B7)
+
+Submits one finished run. Body (JSON, at most 2 KB):
+
+```json
+{ "runId": "6f1c…", "name": "Loretta", "outcome": "victory", "wins": 5, "lives": 2, "rounds": 6 }
+```
+
+| Field | Rule |
+|---|---|
+| `runId` | 8–64 letters, digits or dashes. Unique per run, created by the client when the run starts. |
+| `name` | 1–20 characters after trimming; letters (any language), digits, spaces and `- _ .`. Multiple spaces are collapsed. |
+| `outcome` | `"victory"` or `"defeat"` |
+| `wins` | whole number 0–5 |
+| `lives` | whole number 0–3 |
+| `rounds` | whole number 1–7 |
+
+The run must also be **possible**: a victory has exactly 5 wins and at least 1 life left, a defeat has 0 lives and fewer than 5 wins, and `rounds` must equal `wins + (3 − lives)` because every round is one battle.
+
+### Responses
+
+| Status | When | Body |
+|---|---|---|
+| 201 | Run stored | `{ "entry": { …, "createdAt": "…" }, "rank": 3, "duplicate": false }` |
+| 200 | The same `runId` with the same data was already stored (e.g. a retry after a lost answer). Nothing is stored twice. | `{ "entry": { … }, "rank": 3, "duplicate": true }` |
+| 400 | Body is not valid JSON | `{ "error": "The request body must be valid JSON." }` |
+| 409 | The same `runId` was already stored with **different** data | `{ "error": "This run was already submitted with different data." }` |
+| 413 | Body larger than 2 KB | `{ "error": "The request body is too large." }` |
+| 422 | A field is missing or invalid, or the run is impossible | `{ "error": "…explains the problem…" }`, e.g. `"rounds does not match wins and lives: this run must have taken 6 rounds."` |
+| 503 | `fail=true` (or `API_FAIL=true`) | `{ "error": "The hall of fame is closed right now. Please try again." }` |
+
+The validation lives in `server/hallOfFame.js` and is unit-tested in `server/hallOfFame.test.js`.
+
+### Client
+
+`fetchHallOfFame()` and `submitRun(submission)` in `src/api.ts` perform the requests and throw an `Error` with a message the player can read.
+
 ## Environment variables
 
 | Variable | Effect |
 |---|---|
 | `PORT` | Port to listen on (default 4200). The Vite proxy expects 4200. |
 | `API_LATENCY` | Default delay in milliseconds when a request has no `latency` parameter. |
-| `API_FAIL` | `true` makes every opponent request fail with 503. |
+| `API_FAIL` | `true` makes every opponent and hall of fame request fail with 503. |
 
 Example: `API_FAIL=true pnpm server`.
 

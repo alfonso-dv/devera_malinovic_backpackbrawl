@@ -5,6 +5,8 @@ import type { GameState } from "../types";
 import { GameContext, type GameContextValue } from "./GameContext";
 
 const randomSeed = () => Math.floor(Math.random() * 2 ** 32);
+/** B7: unique id per run (used by the hall of fame to recognise the same run). */
+const newRunId = () => (typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `run-${Date.now()}-${Math.floor(Math.random() * 1e9)}`);
 
 /* B6: localStorage can be missing or blocked (private mode, disabled cookies), so every
  * access is wrapped in try/catch. Without storage the game still works, it just isn't saved. */
@@ -41,7 +43,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
     notice,
     startNewRun: () => {
       setNotice(null);
-      setGame(newGame(randomSeed()));
+      setGame(newGame(randomSeed(), newRunId()));
     },
     update: (transition) => setGame((current) => (current ? transition(current) : current)),
   };
