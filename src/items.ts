@@ -32,6 +32,9 @@ export function getItem(id: string): ItemDef {
   return item;
 }
 
+/** B6: true if `id` is an item of the catalog (used to validate saved data). */
+export const isKnownItem = (id: unknown): id is string => typeof id === "string" && byId.has(id);
+
 const EFFECT_LABELS: [keyof ItemEffects, (n: number) => string][] = [
   ["damage", (n) => `⚔️ ${n} dmg`],
   ["block", (n) => `🛡️ +${n} block`],

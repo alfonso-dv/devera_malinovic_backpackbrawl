@@ -100,4 +100,13 @@ export const RULES: RuleSection[] = [
       `Opponents get set bonuses by the same rules.`,
     ],
   },
+  {
+    title: "💾 Saving",
+    rules: [
+      `Your run is saved in this browser after every action. Reload the page and you continue on the same screen.`,
+      `Reloading during a search cancels it: you are back in the shop with the same offers and gold and can search again.`,
+      `Reloading during a battle jumps to its end. The result stays the same and counts exactly once.`,
+      `A damaged or outdated save is discarded and you can start a new run.`,
+    ],
+  },
 ];
