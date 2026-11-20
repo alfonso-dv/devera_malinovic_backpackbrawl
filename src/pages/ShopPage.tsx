@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { fetchOpponent } from "../api";
 import { Backpack } from "../components/Backpack";
 import { FightBar } from "../components/FightBar";
@@ -11,6 +12,12 @@ import { useActiveGame } from "../state/GameContext";
 export function ShopPage() {
   const { game, update } = useActiveGame();
   const { run, phase } = game;
+
+  /** The request that is running right now, so a second click can't send another one. */
+  const pending = useRef<AbortController | null>(null);
+
+  // Leaving the page cancels a running request (its result would be ignored anyway).
+  useEffect(() => () => pending.current?.abort(), []);
 
   function handleBuy(offerIndex: number) {
     update((current) => updateRun(current, (currentRun) => buyItem(currentRun, offerIndex)));
@@ -30,16 +37,25 @@ export function ShopPage() {
   }
 
 
+  /* ------------- B5 IMPLEMENTATION ------------- */
+
   // Once the opponent is found the phase becomes "battle" and RequireRoute redirects to the battle page.
+  // The game rules (startSearch / startBattle / searchFailed) ignore every response that doesn't belong
+  // to the running search, so even a slow, duplicate or late response can't start or restart a battle.
   async function handleFindOpponent() {
-    if (fightBlocker(game) !== null) return;
-    update(startSearch);
+    if (fightBlocker(game) !== null || pending.current) return;
+    const searchId = newSearchId();
+    const controller = new AbortController();
+    pending.current = controller;
+    update((current) => startSearch(current, searchId));
     try {
-      const opponent = await fetchOpponent(run.round);
-      update((current) => startBattle(current, opponent));
+      const opponent = await fetchOpponent(run.round, controller.signal);
+      update((current) => startBattle(current, searchId, opponent));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Opponent search failed.";
-      update((current) => searchFailed(current, message));
+      update((current) => searchFailed(current, searchId, message));
+    } finally {
+      if (pending.current === controller) pending.current = null;
     }
   }
 
@@ -60,4 +76,9 @@ export function ShopPage() {
       </fieldset>
     </>
   );
+}
+
+/** A unique id for every opponent search. */
+function newSearchId(): string {
+  return typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
 }
