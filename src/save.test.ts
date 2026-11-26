@@ -1,139 +1,172 @@
-import { isValidOpponent } from "./api";
-import { buildOpponentFighter, buildPlayerFighter, simulateBattle } from "./battle";
-import { skipReplay } from "./game";
-import { isKnownItem } from "./items";
-import { runOutcome, START_LIVES, WINS_TO_VICTORY } from "./run";
-import { BACKPACK_SIZE, SHOP_SIZE } from "./shop";
-import type { GameState, Opponent, Phase, RunState } from "./types";
+import { describe, expect, it } from "vitest";
+import { advanceReplay, isReplayDone, newGame, skipReplay, startBattle, startSearch } from "./game";
+import { buyItem } from "./run";
+import { loadGame, SAVE_VERSION, SEARCH_INTERRUPTED, toSaveData } from "./save";
+import type { GameState, Opponent, RunState } from "./types";
 
-/* ------------- B6: save & resume -------------
- *
- * What is saved: the run (round, gold, lives, wins, seed, shop, backpack, nextUid),
- * the phase and — during a battle — only the opponent. The battle itself is NOT saved:
- * it is simulated again from backpack + opponent, which gives exactly the same result
- * because the simulation is deterministic. So nobody can edit a saved battle result.
- *
- * Refresh policy:
- * - During a search: the request is lost. The game returns to the shop with a message
- *   and the player can search again. The shop, gold and backpack are unchanged
- *   (no free reroll), and the opponent per round is fixed by the server (no other opponent).
- * - During a battle replay: the battle is restored and jumps straight to its end. The result
- *   is applied exactly once — refreshing can't avoid a loss or give a second result.
- *
- * Saved data that is malformed, from another version or describes an impossible run is
- * thrown away and the player starts at the start page (a playable state).
- */
+/* ------------- B6 TESTS ------------- */
 
-export const SAVE_KEY = "backpack-brawl:save";
-/** Bump when the format changes; older saves are then rejected as incompatible. B7: 2 = runs have an `id`. */
-export const SAVE_VERSION = 2;
+const SEED = 12345;
 
-export const SEARCH_INTERRUPTED = "The search was interrupted by reloading the page. Nothing was lost — just search again.";
-
-export interface SaveData {
-    version: number;
-    phase: Phase;
-    run: RunState;
-    /** Only during a battle: the opponent of the battle. */
-    opponent: Opponent | null;
-    /** Only during a battle: true if the result is already part of `run`. */
-    resultApplied: boolean;
+/** Simulates a browser refresh: game state → JSON (localStorage) → game state. */
+function reload(game: GameState): GameState | null {
+    return loadGame(JSON.stringify(toSaveData(game))).game;
 }
 
-/** The part of the game that is worth saving. */
-export function toSaveData(game: GameState): SaveData {
-    const battle = game.battle;
-    return {
-        version: SAVE_VERSION,
-        phase: game.phase,
-        run: game.run,
-        opponent: game.phase === "battle" && battle ? battle.opponent : null,
-        resultApplied: battle ? battle.frame >= battle.result.frames.length - 1 : false,
-    };
+/** A game in the shop with one item bought, so a search may start. */
+function shopGame(): GameState {
+    const game = newGame(SEED);
+    return { ...game, run: buyItem({ ...game.run, gold: 100 }, 0) };
 }
 
-export interface LoadResult {
-    game: GameState | null;
-    /** Message for the player if a save existed but could not be used. */
-    notice: string | null;
+const opponent = (round = 1): Opponent => ({
+    id: "mossback-hermit",
+    name: "Mossback Hermit",
+    icon: "🐢",
+    hp: 25,
+    items: ["chipped-dagger", "pot-lid"],
+    round,
+});
+
+/** A battle that was just started (replay at frame 0, result not applied yet). */
+function battleGame(): GameState {
+    return startBattle(startSearch(shopGame(), "s1"), "s1", opponent());
 }
 
-/** Turns the saved string back into a game. Never throws. */
-export function loadGame(raw: string | null): LoadResult {
-    if (raw === null) return { game: null, notice: null };
-    try {
-        const data: unknown = JSON.parse(raw);
-        const game = restore(data);
-        if (game) return { game, notice: null };
-    } catch {
-        // invalid JSON — handled below
-    }
-    return { game: null, notice: "Your saved run could not be loaded (damaged or from an older version), so a fresh start is waiting for you." };
+/** Number of battles recorded in a run (wins + lost lives). */
+const battlesIn = (run: RunState) => run.wins + (3 - run.lives);
+
+describe("refresh policy", () => {
+    it("restores the shop exactly as it was (no free reroll)", () => {
+        const game = shopGame();
+        const loaded = reload(game);
+        expect(loaded).toEqual(game);
+        expect(loaded?.run.shop).toEqual(game.run.shop);
+        expect(loaded?.run.seed).toBe(game.run.seed);
+        expect(loaded?.run.gold).toBe(game.run.gold);
+    });
+
+    it("turns a running search into the shop with a message, nothing else changes", () => {
+        const searching = startSearch(shopGame(), "s1");
+        const loaded = reload(searching);
+        expect(loaded?.phase).toBe("shop");
+        expect(loaded?.search).toBeNull();
+        expect(loaded?.error).toBe(SEARCH_INTERRUPTED);
+        expect(loaded?.run).toEqual(searching.run);
+    });
+
+    it("jumps a running battle to its end and applies the result exactly once", () => {
+        const battle = advanceReplay(advanceReplay(battleGame()));
+        expect(battle.battle && isReplayDone(battle.battle)).toBe(false);
+
+        const loaded = reload(battle);
+        expect(loaded?.phase).toBe("battle");
+        expect(loaded?.battle && isReplayDone(loaded.battle)).toBe(true);
+        expect(battlesIn(loaded!.run)).toBe(battlesIn(battle.run) + 1);
+    });
+
+    it("changes nothing on a second reload", () => {
+        const once = reload(battleGame());
+        const twice = reload(once!);
+        expect(twice).toEqual(once);
+    });
+
+    it("gives the same result as watching the battle to the end (no avoided defeat)", () => {
+        const battle = battleGame();
+        const watched = skipReplay(battle);
+        expect(reload(battle)?.run).toEqual(watched.run);
+        expect(reload(battle)?.battle?.result.winner).toBe(watched.battle?.result.winner);
+    });
+
+    it("does not apply a result again when the replay had already finished", () => {
+        const done = skipReplay(battleGame());
+        expect(toSaveData(done).resultApplied).toBe(true);
+        expect(reload(done)?.run).toEqual(done.run);
+    });
+
+    it("keeps the result screen of a finished run", () => {
+        const game = shopGame();
+        const finished: GameState = { ...game, phase: "finished", run: { ...game.run, wins: 5, lives: 3, round: 5 } };
+        const loaded = reload(finished);
+        expect(loaded?.phase).toBe("finished");
+        expect(loaded?.run).toEqual(finished.run);
+    });
+
+    it("saves the opponent only during a battle", () => {
+        expect(toSaveData(shopGame()).opponent).toBeNull();
+        expect(toSaveData(battleGame()).opponent).toEqual(opponent());
+    });
+});
+
+/* ---- Broken, incompatible or impossible saves ---- */
+
+/** A valid shop save with some fields replaced. */
+function saveWith(changes: { run?: Record<string, unknown>; [key: string]: unknown }): string {
+    const data = toSaveData(shopGame());
+    const { run, ...rest } = changes;
+    return JSON.stringify({ ...data, ...rest, run: { ...data.run, ...run } });
 }
 
-function restore(data: unknown): GameState | null {
-    if (!isObject(data) || data.version !== SAVE_VERSION) return null;
-    const run = data.run;
-    if (!isValidRun(run)) return null;
-    const over = runOutcome(run) !== null;
-
-    switch (data.phase) {
-        case "shop":
-            return over ? null : { phase: "shop", run, search: null, battle: null, error: null };
-
-        case "searching":
-            // Policy: a search can't survive a refresh → back to the shop, try again.
-            return over ? null : { phase: "shop", run, search: null, battle: null, error: SEARCH_INTERRUPTED };
-
-        case "finished":
-            return over ? { phase: "finished", run, search: null, battle: null, error: null } : null;
-
-        case "battle": {
-            const opponent = data.opponent;
-            const applied = data.resultApplied;
-            if (!isValidOpponent(opponent) || typeof applied !== "boolean") return null;
-            // Before the result is applied the battle belongs to the current round.
-            if (!applied && (over || opponent.round !== run.round)) return null;
-            const player = buildPlayerFighter(run.backpack);
-            const enemy = buildOpponentFighter(opponent);
-            const result = simulateBattle(player, enemy);
-            const last = result.frames.length - 1;
-            // Not applied yet: start at frame 0 and skip, which applies the result exactly once.
-            const game: GameState = { phase: "battle", run, search: null, error: null, battle: { opponent, player, enemy, result, frame: applied ? last : 0 } };
-            return applied ? game : skipReplay(game);
-        }
-
-        default:
-            return null;
-    }
+/** A rejected save gives no game (start page) and a message for the player. Never throws. */
+function expectRejected(raw: string) {
+    const result = loadGame(raw);
+    expect(result.game).toBeNull();
+    expect(typeof result.notice).toBe("string");
 }
 
-const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
-const isInt = (value: unknown, min: number, max = Number.MAX_SAFE_INTEGER): value is number =>
-    Number.isInteger(value) && (value as number) >= min && (value as number) <= max;
+describe("rejected saves", () => {
+    it("rejects text that is not JSON", () => {
+        expectRejected("{ this is not json");
+    });
 
-/** Checks shape AND plausibility: no negative gold, no unknown items, round fits wins and losses, … */
-export function isValidRun(value: unknown): value is RunState {
-    if (!isObject(value)) return false;
-    const { id, round, gold, lives, wins, seed, shop, backpack, nextUid } = value;
-    if (typeof id !== "string" || !/^[A-Za-z0-9-]{8,64}$/.test(id)) return false; // B7: run id for the hall of fame
-    if (!isInt(round, 1) || !isInt(gold, 0) || !isInt(lives, 0, START_LIVES) || !isInt(wins, 0, WINS_TO_VICTORY)) return false;
-    if (!isInt(seed, 0, 2 ** 32 - 1) || !isInt(nextUid, 1)) return false;
-    if (lives === 0 && wins === WINS_TO_VICTORY) return false; // can't win and lose at the same time
+    it("rejects a save from another version", () => {
+        expectRejected(saveWith({ version: SAVE_VERSION - 1 }));
+    });
 
-    // Every round is one battle: round = wins + losses + 1 (no +1 once the run is over).
-    const losses = START_LIVES - lives;
-    const over = lives === 0 || wins === WINS_TO_VICTORY;
-    if (round !== wins + losses + (over ? 0 : 1)) return false;
+    it("rejects negative gold", () => {
+        expectRejected(saveWith({ run: { gold: -5 } }));
+    });
 
-    if (!Array.isArray(shop) || shop.length !== SHOP_SIZE || !shop.every((id) => id === null || isKnownItem(id))) return false;
-    if (!Array.isArray(backpack) || backpack.length !== BACKPACK_SIZE) return false;
-    const uids = new Set<string>();
-    for (const slot of backpack) {
-        if (slot === null) continue;
-        if (!isObject(slot) || typeof slot.uid !== "string" || !isKnownItem(slot.itemId)) return false;
-        if (uids.has(slot.uid)) return false; // an item can't be in two slots
-        uids.add(slot.uid);
-    }
-    return true;
-}
+    it("rejects too many lives", () => {
+        expectRejected(saveWith({ run: { lives: 4 } }));
+    });
+
+    it("rejects a round that doesn't fit wins and losses", () => {
+        expectRejected(saveWith({ run: { round: 7, wins: 0, lives: 3 } }));
+    });
+
+    it("rejects a run that is won and lost at once", () => {
+        expectRejected(saveWith({ run: { wins: 5, lives: 0, round: 8 } }));
+    });
+
+    it("rejects an unknown item in the backpack", () => {
+        const backpack = [{ uid: "item-1", itemId: "golden-sword" }, null, null, null, null, null];
+        expectRejected(saveWith({ run: { backpack } }));
+    });
+
+    it("rejects an unknown item in the shop", () => {
+        expectRejected(saveWith({ run: { shop: ["golden-sword", null, null, null] } }));
+    });
+
+    it("rejects a backpack of the wrong size", () => {
+        expectRejected(saveWith({ run: { backpack: [null, null, null] } }));
+    });
+
+    it("rejects the same item in two slots (duplicate uid)", () => {
+        const item = { uid: "item-1", itemId: "pot-lid" };
+        expectRejected(saveWith({ run: { backpack: [item, item, null, null, null, null] } }));
+    });
+
+    it("rejects a run without an id", () => {
+        expectRejected(saveWith({ run: { id: undefined } }));
+    });
+
+    it("rejects a battle with an invalid opponent", () => {
+        expectRejected(saveWith({ phase: "battle", opponent: { id: "ghost" }, resultApplied: false }));
+    });
+
+    it("rejects an unknown phase or a phase that doesn't fit the run", () => {
+        expectRejected(saveWith({ phase: "paused" }));
+        expectRejected(saveWith({ phase: "shop", run: { wins: 5, lives: 3, round: 5 } }));
+    });
+});
